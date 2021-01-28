@@ -16,6 +16,7 @@ import lightgbm as lgb
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 import time
+import matplotlib.patches as mpatches
 #%% filter non sale date
 with open(r'dropNSale.pickle','rb') as file:
     dropNSale = pickle.load(file)
@@ -28,6 +29,11 @@ calendar = pd.read_csv(r'data/calendar.csv')
 sales = pd.read_csv(r'data/sales_train_evaluation.csv')
 # memory usage: 452.9+ MB
 calendar['date'] = pd.to_datetime(calendar['date'])
+calendar.loc[(calendar['month'] == 12)&(calendar['date'].dt.day ==23),'event_name_1'] = 'Christmas Eve before'
+calendar.loc[(calendar['event_name_1'] == "SuperBowl"),'date']
+mon_event =[]
+for i in range(1,13):
+    mon_event.append(calendar.loc[(calendar['month'] == i)&(calendar['event_name_1'].notna()),'event_name_1'].unique())
 
 #%%
 d_End = 1942 
@@ -40,9 +46,8 @@ df = sales.copy()
 df = df.assign(id=df.id.str.replace("_evaluation", ""))
 df = df.reindex(columns=df.columns.tolist() + ["d_" + str(d_End + i) for i in range(d_test)])
 df = df.melt(id_vars=["id", "item_id", "store_id", "state_id", "dept_id", "cat_id"], var_name='d', value_name='sold')
-df = df.assign(d=df['d'].str[2:].astype("int16"),
-               sold=df['sold'].astype("float16"))
-
+df = df.assign(d=df['d'].str[2:].astype(int))
+calendar = calendar.assign(d = calendar.d.str[2:].astype(int))
 #%%
 # Add sold features
 # merge 3 datasets
@@ -57,35 +62,167 @@ df = df.drop(["wm_yr_wk"], axis=1)
 # =============================================================================
 # df_nonZero = df.loc[(df['id']=='HOBBIES_1_001_CA_1')|(df['id']=='HOBBIES_1_001_CA_2')]
 # df_nonZero = df.loc[(df['id']=='FOODS_2_154_WI_3')]
+#%% for cat_id and event_name_1 plot bar 
+ddd = df.groupby(['event_name_1','cat_id'])['sold'].sum()
+ddd3 = df.groupby(['event_name_1','cat_id'])['sold'].sum().unstack(level=1)
+
+sns.set()
+fig = plt.figure(figsize=(15,15),dpi=300)
+ddd3= ddd3.assign(sum1 = ddd3.FOODS+ddd3.HOBBIES+ddd3.HOUSEHOLD)
+ddd3 = ddd3.sort_values('sum1', ascending=True)
+ddd3[['FOODS', 'HOBBIES', 'HOUSEHOLD']].plot(kind='barh',stacked=True,legend=True,fontsize=20,ax=plt.gca())
+plt.title("Total sales from event",size=30)
+#%% Copmarsion of different sale between state and month
+month_ana =  df.groupby(['month','state_id','cat_id'])['sold'].sum().unstack(level=1).reset_index()
+CA_mon = month_ana[['month', 'cat_id', 'CA']]
+TX_mon = month_ana[['month', 'cat_id', 'TX']]
+WI_mon = month_ana[['month', 'cat_id', 'WI']]
+
+fig, ax = plt.subplots(1, 3, constrained_layout=True,figsize=(15,8), dpi=300)
+rgb = ['b','g','r']
+from matplotlib.lines import Line2D
+
+custom_lines = [Line2D([0], [0], color='b', lw=4),
+                Line2D([0], [0], color='g', lw=4),
+                Line2D([0], [0], color='r', lw=4)]
+
+for cat,color in zip(month_ana['cat_id'].unique().tolist(),rgb):
+    ax[0].plot(CA_mon.loc[CA_mon['cat_id']==cat,'month']
+               ,CA_mon.loc[CA_mon['cat_id']==cat,'CA']
+               ,f'{color}',linewidth=2.2, alpha=0.5,label='CA',markersize=2.5)
+    ax[0].plot(CA_mon.loc[CA_mon['cat_id']==cat,'month']
+               ,CA_mon.loc[CA_mon['cat_id']==cat,'CA']
+               ,f'{color}.',linewidth=4, alpha=0.5,label='CA',markersize=4.5)
+    ax[0].set_title('CA',size = 20)
+    
+    ax[1].plot(TX_mon.loc[CA_mon['cat_id']==cat,'month']
+               ,TX_mon.loc[CA_mon['cat_id']==cat,'TX']
+               ,f'{color}',linewidth=2.2, alpha=0.5,label='TX',markersize=2.5)
+    ax[1].plot(TX_mon.loc[CA_mon['cat_id']==cat,'month']
+               ,TX_mon.loc[CA_mon['cat_id']==cat,'TX']
+               ,f'{color}.',linewidth=4, alpha=0.5,label='TX',markersize=4.5)
+    ax[1].set_title('TX',size = 20)
+    
+    ax[2].plot(WI_mon.loc[CA_mon['cat_id']==cat,'month']
+               ,WI_mon.loc[CA_mon['cat_id']==cat,'WI']
+               ,f'{color}',linewidth=2.2, alpha=0.5,label='WI',markersize=2.5)
+    ax[2].plot(WI_mon.loc[CA_mon['cat_id']==cat,'month']
+               ,WI_mon.loc[CA_mon['cat_id']==cat,'WI']
+               ,f'{color}.',linewidth=4, alpha=0.5,label='WI',markersize=4.5)
+    ax[2].set_title('WI',size = 20)
+for i in range(3):
+    ax[i].set_ylabel('sold sum',size = 20)
+    ax[i].set_xlabel('month',size = 20)
+
+# ax[0].set_title('CA_snap',size = 20)
+ax[0].legend(custom_lines, ['FOODS', 'HOBBIES', 'HOUSEHOLD'])
+ax[1].legend(custom_lines, ['FOODS', 'HOBBIES', 'HOUSEHOLD'])
+ax[2].legend(custom_lines, ['FOODS', 'HOBBIES', 'HOUSEHOLD'])
+fig.suptitle("Copmarsion of different sale between state and month", fontsize=30,y=1.07)
 #%%
-df.set_index('App').T.plot(kind='bar', stacked=True)
+ccc=[]
+for k in mon_event:
+    ccc.append(df.loc[df['event_name_1'].isin(k)]['sold'].sum())
+#%% Copmarsion of different sale between state and week
+week_ana =  df.groupby(['weekday','state_id','cat_id'])['sold'].sum().unstack(level=1).reset_index()
+weekdays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+# CA
+CA_week = week_ana[['weekday', 'cat_id', 'CA']]
+CA_week = CA_week.set_index('weekday')
+CA_week = CA_week.loc[weekdays].reset_index()
+# TX
+TX_week = week_ana[['weekday', 'cat_id', 'TX']]
+TX_week = TX_week.set_index('weekday')
+TX_week = TX_week.loc[weekdays].reset_index()
+# WI
+WI_week = week_ana[['weekday', 'cat_id', 'WI']]
+WI_week = WI_week.set_index('weekday')
+WI_week = WI_week.loc[weekdays].reset_index()
+fig, ax = plt.subplots(1, 3, constrained_layout=True,figsize=(15,8), dpi=300)
+rgb = ['b','g','r']
+from matplotlib.lines import Line2D
 
+custom_lines = [Line2D([0], [0], color='b', lw=4),
+                Line2D([0], [0], color='g', lw=4),
+                Line2D([0], [0], color='r', lw=4)]
 
-#%%
-fig, ax = plt.subplots(2, 1, constrained_layout=True,figsize=(15,8), dpi=300)
+for cat,color in zip(week_ana['cat_id'].unique().tolist(),rgb):
+    ax[0].plot(CA_week.loc[CA_week['cat_id']==cat,'weekday']
+               ,CA_week.loc[CA_week['cat_id']==cat,'CA']
+               ,f'{color}',linewidth=2.2, alpha=0.5,label='CA',markersize=2.5)
+    ax[0].plot(CA_week.loc[CA_week['cat_id']==cat,'weekday']
+               ,CA_week.loc[CA_week['cat_id']==cat,'CA']
+               ,f'{color}.',linewidth=4, alpha=0.5,label='CA',markersize=4.5)
+    ax[0].set_title('CA',size = 20)
+    
+    ax[1].plot(TX_week.loc[TX_week['cat_id']==cat,'weekday']
+               ,TX_week.loc[TX_week['cat_id']==cat,'TX']
+               ,f'{color}',linewidth=2.2, alpha=0.5,label='TX',markersize=2.5)
+    ax[1].plot(TX_week.loc[TX_week['cat_id']==cat,'weekday']
+               ,TX_week.loc[TX_week['cat_id']==cat,'TX']
+               ,f'{color}.',linewidth=4, alpha=0.5,label='TX',markersize=4.5)
+    ax[1].set_title('TX',size = 20)
+    
+    ax[2].plot(WI_week.loc[WI_week['cat_id']==cat,'weekday']
+               ,WI_week.loc[WI_week['cat_id']==cat,'WI']
+               ,f'{color}',linewidth=2.2, alpha=0.5,label='WI',markersize=2.5)
+    ax[2].plot(WI_week.loc[WI_week['cat_id']==cat,'weekday']
+               ,WI_week.loc[WI_week['cat_id']==cat,'WI']
+               ,f'{color}.',linewidth=4, alpha=0.5,label='WI',markersize=4.5)
+    ax[2].set_title('WI',size = 20)
+for i in range(3):
+    ax[i].set_ylabel('sold sum',size = 20)
+    ax[i].set_xlabel('weekday',size = 20)
+ax[0].legend(custom_lines, ['FOODS', 'HOBBIES', 'HOUSEHOLD'])
+ax[1].legend(custom_lines, ['FOODS', 'HOBBIES', 'HOUSEHOLD'])
+ax[2].legend(custom_lines, ['FOODS', 'HOBBIES', 'HOUSEHOLD'])
+fig.suptitle("Copmarsion of different sale between state and weekday", fontsize=30,y=1.07)
+#%% Copmarsion of different sale between state and year
+year_ana =  df.groupby(['year','state_id','cat_id'])['sold'].sum().unstack(level=1).reset_index()
+CA_year = year_ana[['year', 'cat_id', 'CA']]
+TX_year = year_ana[['year', 'cat_id', 'TX']]
+WI_year = year_ana[['year', 'cat_id', 'WI']]
 
-ax[0].plot(df_Zero['d']
-           ,df_Zero['sold']
-           ,'b',linewidth=0.8, alpha=0.5,label='CA',markersize=2.5)
-# ax[0].plot(df_all.loc[(date_before<= df_all['date'])& (df_all['date']<= date_after),'date']
-#            ,df_all.loc[(date_before<= df_all['date'])& (df_all['date']<= date_after),'snap_CA'].tolist()
-#            ,'b',linewidth=0.8, alpha=0.5,label='CA')
-ax[0].grid(b=True, which='major', color='teal', linestyle='-',linewidth=0.5, alpha=0.3,axis='x')
-ax[0].set_ylabel('sold',size = 15)
-ax[0].set_xlabel('D',size = 20)
-ax[0].set_title('Origin',size = 20)
+fig, ax = plt.subplots(1, 3, constrained_layout=True,figsize=(15,8), dpi=300)
+rgb = ['b','g','r']
+from matplotlib.lines import Line2D
 
-ax[1].plot(df_nonZero['d']
-           ,df_nonZero['sold']
-           ,'b',linewidth=0.8, alpha=0.5,label='CA',markersize=2.5)
-# ax[0].plot(df_all.loc[(date_before<= df_all['date'])& (df_all['date']<= date_after),'date']
-#            ,df_all.loc[(date_before<= df_all['date'])& (df_all['date']<= date_after),'snap_CA'].tolist()
-#            ,'b',linewidth=0.8, alpha=0.5,label='CA')
-ax[1].grid(b=True, which='major', color='teal', linestyle='-',linewidth=0.5, alpha=0.3,axis='x')
-ax[1].set_ylabel('sold',size = 15)
-ax[1].set_xlabel('D',size = 20)
-ax[1].set_title('Deletes date of unsold items',size = 20)
-fig.suptitle("Copmarsion of delete date (HOBBIES_1_001_CA_2)", fontsize=30,y=1.07)
+custom_lines = [Line2D([0], [0], color='b', lw=4),
+                Line2D([0], [0], color='g', lw=4),
+                Line2D([0], [0], color='r', lw=4)]
+
+for cat,color in zip(year_ana['cat_id'].unique().tolist(),rgb):
+    ax[0].plot(CA_year.loc[CA_year['cat_id']==cat,'year']
+               ,CA_year.loc[CA_year['cat_id']==cat,'CA']
+               ,f'{color}',linewidth=2.2, alpha=0.5,label='CA',markersize=2.5)
+    ax[0].plot(CA_year.loc[CA_year['cat_id']==cat,'year']
+               ,CA_year.loc[CA_year['cat_id']==cat,'CA']
+               ,f'{color}.',linewidth=4, alpha=0.5,label='CA',markersize=4.5)
+    ax[0].set_title('CA',size = 20)
+    
+    ax[1].plot(TX_year.loc[TX_year['cat_id']==cat,'year']
+               ,TX_year.loc[TX_year['cat_id']==cat,'TX']
+               ,f'{color}',linewidth=2.2, alpha=0.5,label='TX',markersize=2.5)
+    ax[1].plot(TX_year.loc[TX_year['cat_id']==cat,'year']
+               ,TX_year.loc[TX_year['cat_id']==cat,'TX']
+               ,f'{color}.',linewidth=4, alpha=0.5,label='TX',markersize=4.5)
+    ax[1].set_title('TX',size = 20)
+    
+    ax[2].plot(WI_year.loc[WI_year['cat_id']==cat,'year']
+               ,WI_year.loc[WI_year['cat_id']==cat,'WI']
+               ,f'{color}',linewidth=2.2, alpha=0.5,label='WI',markersize=2.5)
+    ax[2].plot(WI_year.loc[WI_year['cat_id']==cat,'year']
+               ,WI_year.loc[WI_year['cat_id']==cat,'WI']
+               ,f'{color}.',linewidth=4, alpha=0.5,label='WI',markersize=4.5)
+    ax[2].set_title('WI',size = 20)
+for i in range(3):
+    ax[i].set_ylabel('sold sum',size = 20)
+    ax[i].set_xlabel('year',size = 20)
+ax[0].legend(custom_lines, ['FOODS', 'HOBBIES', 'HOUSEHOLD'])
+ax[1].legend(custom_lines, ['FOODS', 'HOBBIES', 'HOUSEHOLD'])
+ax[2].legend(custom_lines, ['FOODS', 'HOBBIES', 'HOUSEHOLD'])
+fig.suptitle("Copmarsion of different sale between state and year", fontsize=30,y=1.07)
+
 
 
 #%%
@@ -131,7 +268,7 @@ group_WI = calendar.groupby(['month', 'year'], as_index=False)['snap_WI'].sum().
 group_WI['date'] = group_WI['year'].astype('str')+'-'+group_WI['month'].astype('str')
 group_WI['date'] = pd.to_datetime(group_WI['date'])
 # plt.show()
-#%%
+#%% density of sold for loss
 plot_density(df['sold'].tolist())
 vv = df['sold'].dropna().tolist()
 vv2 =  list(map(int, vv))
@@ -190,6 +327,3 @@ ax[2].grid(b=True, which='major', color='teal', linestyle='-',linewidth=0.5, alp
 ax[2].set_ylabel('Whether SNAP?',size = 15)
 ax[2].set_xlabel('Date',size = 20)
 ax[2].set_title('WI_snap',size = 20)
-#%% unmelt # df.pivot is not work on some ver. # df.pivot_table is very slow for e3_1230
-# df2 = df.pivot_table(index=['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
-#                , columns='d')['sold'].reset_index(drop=False)
